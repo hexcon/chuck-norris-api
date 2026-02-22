@@ -1,0 +1,32 @@
+# Production overlay — used on EC2 via: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  app:
+    build: !reset null
+    image: ghcr.io/${GITHUB_REPO}:latest
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "chuck-norris-api"
+
+  db:
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

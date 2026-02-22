@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    container_name: chuck-norris-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://chuckuser:chuckpass@db:5432/chucknorris
+      - ADMIN_SECRET=${ADMIN_SECRET}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  db:
+    image: postgres:16-alpine
+    container_name: chuck-norris-db
+    environment:
+      POSTGRES_USER: chuckuser
+      POSTGRES_PASSWORD: chuckpass
+      POSTGRES_DB: chucknorris
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chuckuser -d chucknorris"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+    # PostgreSQL is NOT exposed to the host — only accessible within Docker network
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge

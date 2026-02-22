@@ -1,0 +1,283 @@
+---
+# ===========================================================================
+# Chuck Norris API — Server Setup and Deployment
+# Usage: ansible-playbook -i inventory playbook.yml
+# ===========================================================================
+- name: Configure and deploy Chuck Norris API
+  hosts: app_servers
+  become: true
+
+  vars:
+    app_dir: /opt/chuck-norris-api
+    github_repo: "{{ lookup('env', 'GITHUB_REPO') | default('your-user/chuck-norris-api', true) }}"
+    admin_secret: "{{ lookup('env', 'ADMIN_SECRET') | default('change-me', true) }}"
+    db_password: "{{ lookup('env', 'DB_PASSWORD') | default('change-me', true) }}"
+    cloudwatch_log_group: "/app/chuck-norris-api"
+
+  handlers:
+    - name: restart sshd
+      ansible.builtin.systemd:
+        name: sshd
+        state: restarted
+
+    - name: restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
+
+  tasks:
+    # -----------------------------------------------------------------------
+    # System updates
+    # -----------------------------------------------------------------------
+    - name: Update apt cache and upgrade all packages
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - fail2ban
+          - ufw
+          - unattended-upgrades
+          - jq
+        state: present
+
+    # -----------------------------------------------------------------------
+    # Automatic security updates
+    # -----------------------------------------------------------------------
+    - name: Enable unattended security upgrades
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+        mode: "0644"
+
+    # -----------------------------------------------------------------------
+    # SSH hardening
+    # -----------------------------------------------------------------------
+    - name: Harden SSH configuration
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+        validate: "sshd -t -f %s"
+      loop:
+        - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin no" }
+        - { regexp: "^#?PasswordAuthentication", line: "PasswordAuthentication no" }
+        - { regexp: "^#?X11Forwarding", line: "X11Forwarding no" }
+        - { regexp: "^#?MaxAuthTries", line: "MaxAuthTries 3" }
+        - { regexp: "^#?AllowTcpForwarding", line: "AllowTcpForwarding no" }
+      notify: restart sshd
+
+    # -----------------------------------------------------------------------
+    # Fail2ban
+    # -----------------------------------------------------------------------
+    - name: Configure fail2ban for SSH
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          port = ssh
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 5
+          bantime = 3600
+          findtime = 600
+        mode: "0644"
+      notify: restart fail2ban
+
+    - name: Enable and start fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: started
+
+    # -----------------------------------------------------------------------
+    # UFW Firewall
+    # -----------------------------------------------------------------------
+    - name: Set UFW default deny incoming
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default allow outgoing
+      community.general.ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Allow SSH through UFW
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow app port through UFW
+      community.general.ufw:
+        rule: allow
+        port: "8000"
+        proto: tcp
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
+    # -----------------------------------------------------------------------
+    # Docker installation (official repo)
+    # -----------------------------------------------------------------------
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Add ubuntu user to docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Start and enable Docker
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    # -----------------------------------------------------------------------
+    # CloudWatch Agent
+    # -----------------------------------------------------------------------
+    - name: Download CloudWatch agent
+      ansible.builtin.get_url:
+        url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
+        dest: /tmp/amazon-cloudwatch-agent.deb
+        mode: "0644"
+
+    - name: Install CloudWatch agent
+      ansible.builtin.apt:
+        deb: /tmp/amazon-cloudwatch-agent.deb
+
+    - name: Configure CloudWatch agent
+      ansible.builtin.copy:
+        dest: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+        content: |
+          {
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/lib/docker/containers/**/*-json.log",
+                      "log_group_name": "{{ cloudwatch_log_group }}",
+                      "log_stream_name": "{instance_id}/app",
+                      "timezone": "UTC"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        mode: "0644"
+
+    - name: Start CloudWatch agent
+      ansible.builtin.command:
+        cmd: >
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+          -a fetch-config
+          -m ec2
+          -s
+          -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+      changed_when: true
+
+    # -----------------------------------------------------------------------
+    # Application deployment
+    # -----------------------------------------------------------------------
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0750"
+
+    - name: Copy docker-compose files
+      ansible.builtin.template:
+        src: "{{ item }}"
+        dest: "{{ app_dir }}/{{ item | basename }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0640"
+      loop:
+        - ../docker-compose.yml
+        - ../docker-compose.prod.yml
+
+    - name: Create production .env file
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/.env"
+        content: |
+          ADMIN_SECRET={{ admin_secret }}
+          DB_USER=chuckuser
+          DB_PASSWORD={{ db_password }}
+          DB_NAME=chucknorris
+          DATABASE_URL=postgresql://chuckuser:{{ db_password }}@db:5432/chucknorris
+          GITHUB_REPO={{ github_repo }}
+          LOG_LEVEL=INFO
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+      no_log: true
+
+    - name: Log in to GHCR
+      ansible.builtin.command:
+        cmd: >
+          docker login ghcr.io
+          -u {{ lookup('env', 'GITHUB_ACTOR') | default('github-user', true) }}
+          --password-stdin
+      args:
+        stdin: "{{ lookup('env', 'GHCR_TOKEN') | default('token', true) }}"
+      changed_when: true
+      no_log: true
+      become: true
+      become_user: ubuntu
+
+    - name: Pull and start application
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --pull always
+      args:
+        chdir: "{{ app_dir }}"
+      become: true
+      become_user: ubuntu
+      changed_when: true
+
+    - name: Wait for application to be healthy
+      ansible.builtin.uri:
+        url: "http://localhost:8000/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 10
+      delay: 5
+      until: health_check.status == 200

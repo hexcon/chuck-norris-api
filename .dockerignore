@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+.env
+.env.*
+!.env.example
+terraform/
+ansible/
+docs/
+tests/
+*.md
+*.pyc
+__pycache__
+.pytest_cache
+test.db
+terraform.tfstate*
+*.tfvars

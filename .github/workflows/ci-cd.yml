@@ -1,0 +1,154 @@
+# ===========================================================================
+# CI/CD Pipeline — Lint → Test → Build → Push → Deploy
+# ===========================================================================
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Lint
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install linters
+        run: pip install ruff
+
+      - name: Run ruff linter
+        run: ruff check app/ tests/
+
+      - name: Run ruff formatter check
+        run: ruff format --check app/ tests/
+
+  # -------------------------------------------------------------------------
+  # Test
+  # -------------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          DATABASE_URL: "sqlite:///./test.db"
+          ADMIN_SECRET: "test-admin-secret"
+        run: pytest tests/ -v --tb=short
+
+  # -------------------------------------------------------------------------
+  # Build & Push Docker Image
+  # -------------------------------------------------------------------------
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # -------------------------------------------------------------------------
+  # Deploy to EC2 via SSH + Ansible
+  # -------------------------------------------------------------------------
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: pip install ansible
+
+      - name: Write SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key.pem
+          chmod 600 ~/.ssh/deploy_key.pem
+
+      - name: Write Ansible inventory
+        run: |
+          cat > ansible/inventory <<EOF
+          [app_servers]
+          ${{ secrets.EC2_HOST }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/deploy_key.pem
+          [app_servers:vars]
+          ansible_python_interpreter=/usr/bin/python3
+          EOF
+
+      - name: Disable SSH host key checking
+        run: |
+          echo 'export ANSIBLE_HOST_KEY_CHECKING=False' >> $GITHUB_ENV
+
+      - name: Run Ansible playbook
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          cd ansible
+          ansible-playbook -i inventory playbook.yml
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          curl -sf "http://${{ secrets.EC2_HOST }}:8000/health" | jq .

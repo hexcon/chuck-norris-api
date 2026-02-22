@@ -1,0 +1,9 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# NEVER commit terraform.tfvars to git — it may contain sensitive data.
+
+aws_region       = "eu-north-1"
+instance_type    = "t2.micro"
+allowed_ssh_cidr = "YOUR_PUBLIC_IP/32"   # Run: curl -s ifconfig.me && echo "/32"
+key_pair_name    = "your-key-pair-name"  # Must already exist in AWS
+alert_email      = "your@email.com"
+project_name     = "chuck-norris-api"
