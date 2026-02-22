@@ -118,6 +118,26 @@ jobs:
       - name: Install Ansible
         run: pip install ansible
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Get runner IP
+        id: runner_ip
+        run: echo "ip=$(curl -s https://api.ipify.org)" >> $GITHUB_OUTPUT
+
+      - name: Open SSH for runner
+        run: |
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ secrets.EC2_SG_ID }} \
+            --protocol tcp \
+            --port 22 \
+            --cidr ${{ steps.runner_ip.outputs.ip }}/32 \
+            --tag-specifications 'ResourceType=security-group-rule,Tags=[{Key=Name,Value=github-actions-temp}]'
+
       - name: Write SSH key
         run: |
           mkdir -p ~/.ssh
@@ -133,10 +153,6 @@ jobs:
           ansible_python_interpreter=/usr/bin/python3
           EOF
 
-      - name: Disable SSH host key checking
-        run: |
-          echo 'export ANSIBLE_HOST_KEY_CHECKING=False' >> $GITHUB_ENV
-
       - name: Run Ansible playbook
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
@@ -148,6 +164,15 @@ jobs:
         run: |
           cd ansible
           ansible-playbook -i inventory playbook.yml
+
+      - name: Close SSH for runner
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ secrets.EC2_SG_ID }} \
+            --protocol tcp \
+            --port 22 \
+            --cidr ${{ steps.runner_ip.outputs.ip }}/32
 
       - name: Verify deployment
         run: |
