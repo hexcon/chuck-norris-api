@@ -3,7 +3,6 @@
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
