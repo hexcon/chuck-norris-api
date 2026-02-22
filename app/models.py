@@ -18,9 +18,7 @@ class Joke(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     text = Column(Text, nullable=False, unique=True)
-    created_at = Column(
-        DateTime(timezone=True), default=_utcnow, nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
 class APIKey(Base):
@@ -32,6 +30,4 @@ class APIKey(Base):
     key_hash = Column(String(64), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(
-        DateTime(timezone=True), default=_utcnow, nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

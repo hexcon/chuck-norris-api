@@ -41,9 +41,11 @@ def verify_api_key(
         )
 
     key_hash = hash_api_key(api_key)
-    db_key = db.query(APIKey).filter(
-        APIKey.key_hash == key_hash, APIKey.is_active.is_(True)
-    ).first()
+    db_key = (
+        db.query(APIKey)
+        .filter(APIKey.key_hash == key_hash, APIKey.is_active.is_(True))
+        .first()
+    )
 
     if not db_key:
         raise HTTPException(

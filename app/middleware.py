@@ -71,9 +71,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         cutoff = now - AUTH_FAILURE_WINDOW
 
         # Clean old entries and add new one
-        _auth_failures[client_ip] = [
-            t for t in _auth_failures[client_ip] if t > cutoff
-        ]
+        _auth_failures[client_ip] = [t for t in _auth_failures[client_ip] if t > cutoff]
         _auth_failures[client_ip].append(now)
 
         # Per-IP brute force detection

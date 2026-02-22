@@ -23,9 +23,7 @@ engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
-TestingSessionLocal = sessionmaker(
-    autocommit=False, autoflush=False, bind=engine
-)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def override_get_db():
@@ -91,7 +89,9 @@ class TestRoot:
 
 
 class TestJokesRead:
-    def _seed_joke(self, client, api_key, text="Chuck Norris can unit test in production."):
+    def _seed_joke(
+        self, client, api_key, text="Chuck Norris can unit test in production."
+    ):
         return client.post(
             "/jokes",
             json={"text": text},
@@ -128,7 +128,8 @@ class TestJokesRead:
     def test_list_jokes_pagination(self, client, api_key):
         for i in range(15):
             self._seed_joke(
-                client, api_key,
+                client,
+                api_key,
                 text=f"Chuck Norris joke number {i} is unique.",
             )
 

@@ -162,9 +162,7 @@ def get_random_joke(request: Request, db: Session = Depends(get_db)):
     responses={404: {"model": ErrorResponse}},
 )
 @limiter.limit("60/minute")
-def get_joke_by_id(
-    joke_id: int, request: Request, db: Session = Depends(get_db)
-):
+def get_joke_by_id(joke_id: int, request: Request, db: Session = Depends(get_db)):
     """Return a specific joke by its ID."""
     joke = db.query(Joke).filter(Joke.id == joke_id).first()
     if not joke:
@@ -196,9 +194,7 @@ def list_jokes(
         .limit(per_page)
         .all()
     )
-    return JokeListResponse(
-        jokes=jokes, total=total, page=page, per_page=per_page
-    )
+    return JokeListResponse(jokes=jokes, total=total, page=page, per_page=per_page)
 
 
 @app.post(
