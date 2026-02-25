@@ -31,3 +31,4 @@ Thumbs.db
 ansible/inventory
 terraform/inventory
 terraform/.terraform.lock.hcl
+.claude
