@@ -1,341 +1,187 @@
-# 🤠 Chuck Norris Jokes API
+# Chuck Norris Jokes API
 
-A RESTful API serving Chuck Norris jokes, built with FastAPI and PostgreSQL, deployed to AWS EC2 with full CI/CD automation.
+A REST API for Chuck Norris jokes, built with FastAPI and PostgreSQL. Deployed to AWS EC2 using Terraform, Ansible, and GitHub Actions.
 
-**Tech Stack:** FastAPI · PostgreSQL · Docker · Terraform · Ansible · GitHub Actions · AWS (EC2, CloudWatch)
+## Overview
 
----
+The API serves jokes through public read endpoints and requires API key authentication for writes. Infrastructure is fully codified — Terraform provisions AWS resources, Ansible handles server configuration and hardening, and GitHub Actions runs the CI/CD pipeline.
 
-## Table of Contents
+**Stack:** Python 3.12 · FastAPI · PostgreSQL 16 · Docker · Terraform · Ansible · GitHub Actions · AWS (EC2, CloudWatch, SNS)
 
-- [Quick Start (Local)](#quick-start-local)
-- [API Usage](#api-usage)
-- [AWS Deployment Guide](#aws-deployment-guide)
-- [CI/CD Pipeline](#cicd-pipeline)
-- [Project Structure](#project-structure)
-- [Security](#security)
-- [Monitoring](#monitoring)
-- [Documentation](#documentation)
+## Local Development
 
----
-
-## Quick Start (Local)
-
-### Prerequisites
-
-- Docker and Docker Compose
-- Git
-
-### Run locally
+Requires Docker and Docker Compose.
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USER/chuck-norris-api.git
+git clone https://github.com/hexcon/chuck-norris-api.git
 cd chuck-norris-api
-
-# Create environment file
-cp .env.example .env
-# Edit .env and set a strong ADMIN_SECRET
-
-# Start the application
+cp .env.example .env    # set a strong ADMIN_SECRET
 docker compose up -d
-
-# Verify it's running
-curl http://localhost:8000/health
 ```
 
-The API is now running at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+The API runs at `http://localhost:8000`. Swagger docs at `/docs`, ReDoc at `/redoc`.
 
-### Generate an API key (required for adding jokes)
-
-```bash
-# Use your ADMIN_SECRET from .env
-curl -X POST http://localhost:8000/api-keys \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_ADMIN_SECRET" \
-  -d '{"name": "my-first-key"}'
-```
-
-Save the returned `api_key` — it won't be shown again.
-
-### Run tests
+### Running Tests
 
 ```bash
 pip install -r requirements.txt
 DATABASE_URL=sqlite:///./test.db ADMIN_SECRET=test pytest tests/ -v
 ```
 
----
-
-## API Usage
+## API Endpoints
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `GET` | `/` | None | Welcome message |
-| `GET` | `/health` | None | Health check |
-| `GET` | `/jokes/random` | None | Random joke |
-| `GET` | `/jokes/{id}` | None | Joke by ID |
-| `GET` | `/jokes?page=1&per_page=10` | None | Paginated list |
+| `GET` | `/health` | — | Health check (includes DB status) |
+| `GET` | `/jokes/random` | — | Random joke |
+| `GET` | `/jokes/{id}` | — | Joke by ID |
+| `GET` | `/jokes?page=1&per_page=10` | — | Paginated listing |
 | `POST` | `/jokes` | API Key | Add a joke |
-| `POST` | `/api-keys` | Admin Secret | Generate API key |
+| `POST` | `/api-keys` | Admin | Generate an API key |
 
-### Examples
+### Generating an API Key
 
 ```bash
-# Get a random joke
-curl http://localhost:8000/jokes/random
-
-# Get joke #5
-curl http://localhost:8000/jokes/5
-
-# Add a new joke
-curl -X POST http://localhost:8000/jokes \
+curl -X POST http://localhost:8000/api-keys \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: cnj_your_key_here" \
-  -d '{"text": "Chuck Norris can compile syntax errors."}'
+  -H "X-API-Key: YOUR_ADMIN_SECRET" \
+  -d '{"name": "my-key"}'
 ```
 
-Full interactive documentation is available at `/docs` (Swagger UI) and `/redoc`.
+The key is returned once and not stored in plaintext — save it.
 
----
+## Infrastructure
 
-## AWS Deployment Guide
+### Architecture
 
-This guide assumes a brand-new AWS account and no prior AWS experience.
-
-### Step 1: AWS Account Setup
-
-1. Create an AWS account at https://aws.amazon.com
-2. **Enable MFA** on the root account (Security best practice)
-3. Create an IAM user for Terraform:
-   - Go to IAM → Users → Create User
-   - Name: `terraform-admin`
-   - Attach policy: `AdministratorAccess` (for demo; use scoped policies in production)
-   - Create access keys → Download the CSV
-
-4. Install the AWS CLI:
-   ```bash
-   # macOS
-   brew install awscli
-
-   # Linux
-   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-   unzip awscliv2.zip && sudo ./aws/install
-   ```
-
-5. Configure credentials:
-   ```bash
-   aws configure
-   # Enter your Access Key ID, Secret Access Key, region: eu-north-1, output: json
-   ```
-
-### Step 2: Create an SSH Key Pair
-
-```bash
-# Create a key pair in AWS
-aws ec2 create-key-pair \
-  --key-name chuck-norris-key \
-  --query 'KeyMaterial' \
-  --output text > ~/.ssh/chuck-norris-key.pem
-
-chmod 600 ~/.ssh/chuck-norris-key.pem
+```
+GitHub Actions (CI/CD)
+  │
+  ├── Lint (ruff) → Test (pytest) → Build & Push (GHCR) → Deploy (Ansible over SSH)
+  │
+  ▼
+AWS EC2 (Ubuntu 24.04)
+  ├── Docker
+  │   ├── FastAPI app (non-root, read-only fs, resource-limited)
+  │   └── PostgreSQL 16 (internal network only)
+  ├── CloudWatch Agent → CloudWatch Logs → Metric Filters → Alarms → SNS (email)
+  ├── UFW Firewall (deny all inbound except 22, 8000)
+  └── Fail2ban (SSH brute force protection)
 ```
 
-### Step 3: Terraform — Provision Infrastructure
+Terraform provisions the EC2 instance, security group, IAM role, CloudWatch log groups, metric filters, and alarms. Ansible configures the OS — installs Docker, hardens SSH, sets up fail2ban and UFW, deploys the CloudWatch agent, and runs the application containers.
+
+### Provisioning
 
 ```bash
-# Install Terraform: https://developer.hashicorp.com/terraform/install
 cd terraform
-
-# Create your variables file
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars:
-#   allowed_ssh_cidr = "YOUR_IP/32"  (run: curl -s ifconfig.me)
-#   key_pair_name    = "chuck-norris-key"
-#   alert_email      = "your@email.com"
-
-# Initialize and apply
-terraform init
-terraform plan    # Review what will be created
-terraform apply   # Type 'yes' to confirm
-
-# Note the outputs — you'll need the IP address
-terraform output
+# Set: allowed_ssh_cidr, key_pair_name, alert_email
+terraform init && terraform apply
 ```
 
-> **Important:** Check your email and confirm the SNS subscription for CloudWatch alerts.
-
-### Step 4: Ansible — Configure Server and Deploy
+### Server Configuration & Deploy
 
 ```bash
-# Install Ansible
-pip install ansible
-
-# Create inventory file
-cd ../ansible
-SERVER_IP=$(cd ../terraform && terraform output -raw instance_public_ip)
-
-cat > inventory <<EOF
-[app_servers]
-${SERVER_IP} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/chuck-norris-key.pem
-[app_servers:vars]
-ansible_python_interpreter=/usr/bin/python3
-EOF
-
-# Run the playbook (set required env vars)
-export ADMIN_SECRET=$(openssl rand -base64 24)
-export DB_PASSWORD=$(openssl rand -base64 24)
-export GITHUB_REPO="your-user/chuck-norris-api"
-
-echo "Save these secrets:"
-echo "  ADMIN_SECRET: $ADMIN_SECRET"
-echo "  DB_PASSWORD:  $DB_PASSWORD"
-
+cd ansible
+# Build inventory from Terraform output, then:
 ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory playbook.yml
 ```
 
-### Step 5: Verify
-
-```bash
-curl http://${SERVER_IP}:8000/health
-curl http://${SERVER_IP}:8000/jokes/random
-```
+See the [deployment guide](docs/architecture.md) for full step-by-step instructions.
 
 ### Teardown
 
 ```bash
-cd terraform
-terraform destroy  # Type 'yes' to confirm — removes all AWS resources
+cd terraform && terraform destroy
 ```
-
----
 
 ## CI/CD Pipeline
 
-The GitHub Actions pipeline runs on every push to `main`:
+Triggered on push to `main`. Four stages:
 
-```
-┌──────┐    ┌──────┐    ┌───────────┐    ┌────────┐
-│ Lint │───▶│ Test │───▶│ Build &   │───▶│ Deploy │
-│      │    │      │    │ Push GHCR │    │ (SSH)  │
-└──────┘    └──────┘    └───────────┘    └────────┘
-```
+1. **Lint** — ruff check and format verification
+2. **Test** — pytest against SQLite (no external deps)
+3. **Build** — multi-stage Docker build, push to GitHub Container Registry
+4. **Deploy** — Ansible playbook over SSH to EC2, with dynamic security group rules for the runner's IP
 
-### Required GitHub Secrets
+Deploy requires GitHub environment approval (`production`).
 
-Set these in **Settings → Secrets and variables → Actions**:
+### GitHub Secrets
 
-| Secret | Description |
-|--------|-------------|
-| `EC2_HOST` | EC2 public IP from Terraform output |
-| `EC2_SSH_KEY` | Contents of your `.pem` file |
+| Secret | Value |
+|--------|-------|
+| `EC2_HOST` | EC2 public IP |
+| `EC2_SSH_KEY` | SSH private key |
 | `ADMIN_SECRET` | Admin secret for API key generation |
 | `DB_PASSWORD` | PostgreSQL password |
 
-> `GITHUB_TOKEN` is automatically provided — no setup needed for GHCR.
+`GITHUB_TOKEN` is provided automatically for GHCR authentication.
 
----
+## Security
+
+### Application Layer
+
+- **Authentication:** API keys hashed with SHA-256, verified with constant-time comparison. Admin operations require a separate secret.
+- **Rate limiting:** 60 req/min (reads), 10 req/min (writes), 5 req/min (key generation). Per-client IP.
+- **Input validation:** Pydantic schemas with length constraints on all inputs.
+- **SQL injection:** Mitigated by SQLAlchemy ORM — all queries are parameterized.
+- **Brute force detection:** Middleware tracks auth failures per IP over a sliding 5-minute window. Fires alerts at 10 failures/IP or 20 failures globally (credential spray).
+
+### Container Security
+
+- Non-root user (`appuser`, no login shell)
+- Read-only filesystem with tmpfs for `/tmp`
+- `no-new-privileges` security option
+- Resource limits: 0.5 CPU, 256MB memory
+- PostgreSQL bound to internal Docker network only
+
+### Host Security
+
+- SSH hardened: key-only auth, root login disabled, max 3 auth attempts, no TCP/X11 forwarding
+- Fail2ban on SSH (1-hour ban after 5 failures)
+- UFW firewall: deny-all inbound, allow 22 and 8000
+- IMDSv2 enforced on EC2 (blocks SSRF to instance metadata)
+- Encrypted EBS volume
+- Automatic security updates via `unattended-upgrades`
+
+Full OWASP Top 10 review and hardening checklist: [docs/security.md](docs/security.md)
+
+## Monitoring
+
+Every request is logged as structured JSON with a unique request ID, client IP, response time, and status code. Logs are forwarded to CloudWatch via the CloudWatch Agent.
+
+CloudWatch alarms notify via SNS email on:
+
+- EC2 instance health check failure
+- Auth failure spike (>20 in 5 min)
+- Brute force detection event
+- Server error spike (>10 in 5 min)
+- Sustained high CPU (>80% for 15 min)
+
+Architecture details: [docs/architecture.md](docs/architecture.md)
 
 ## Project Structure
 
 ```
-chuck-norris-api/
-├── app/                    # Application source code
-│   ├── main.py             # FastAPI routes
-│   ├── models.py           # SQLAlchemy models
-│   ├── database.py         # Database connection
-│   ├── schemas.py          # Pydantic validation
-│   ├── auth.py             # API key authentication
-│   ├── middleware.py        # Logging & rate limiting
-│   ├── logging_config.py   # Structured JSON logging
-│   └── seed_data.py        # Pre-loaded jokes
-├── tests/                  # Automated tests
-├── terraform/              # Infrastructure as Code
-├── ansible/                # Configuration management
-├── .github/workflows/      # CI/CD pipeline
-├── docs/                   # Additional documentation
-├── Dockerfile              # Multi-stage, hardened
-└── docker-compose.yml      # Local development
+├── app/                     # Application code
+│   ├── main.py              # Routes and lifespan
+│   ├── models.py            # SQLAlchemy models
+│   ├── schemas.py           # Pydantic schemas
+│   ├── auth.py              # API key auth
+│   ├── middleware.py         # Logging, brute force detection
+│   ├── database.py          # DB engine and sessions
+│   ├── logging_config.py    # JSON log formatter
+│   └── seed_data.py         # Initial joke data
+├── tests/                   # pytest suite
+├── terraform/               # AWS infrastructure
+├── ansible/                 # Server config and deployment
+├── .github/workflows/       # CI/CD pipeline
+├── docs/                    # Architecture, security, API docs
+├── Dockerfile               # Multi-stage build
+├── docker-compose.yml       # Local dev
+└── docker-compose.prod.yml  # Production overlay
 ```
-
----
-
-## Security
-
-See [docs/security.md](docs/security.md) for the full OWASP Top 10 review and server hardening checklist.
-
-Key security measures implemented:
-
-- API key authentication (SHA-256 hashed, constant-time comparison)
-- Rate limiting (60 req/min read, 10 req/min write)
-- Non-root Docker containers with read-only filesystem
-- SSH hardened (key-only, no root, max 3 retries)
-- Fail2ban for brute force protection
-- IMDSv2 enforced on EC2 (SSRF mitigation)
-- Input validation on all endpoints
-- PostgreSQL not exposed to internet
-- Encrypted EBS volume
-- Automated security updates
-
----
-
-## Monitoring
-
-See [docs/architecture.md](docs/architecture.md) for the monitoring architecture.
-
-- **Health endpoint:** `GET /health` — returns database connectivity status
-- **Structured JSON logs** — every request logged with request ID, client IP, response time
-- **CloudWatch Alarms:** Instance health, auth failure spikes, brute force detection, server errors, high CPU
-- **Alert notifications** via SNS email
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [docs/api.md](docs/api.md) | API reference |
-| [docs/architecture.md](docs/architecture.md) | Architecture decisions and diagrams |
-| [docs/security.md](docs/security.md) | OWASP Top 10 review and hardening |
-| [docs/siem-integration.md](docs/siem-integration.md) | SIEM forwarding guide |
-| `/docs` endpoint | Auto-generated Swagger UI |
-
----
-
-## Terraform State — S3 Backend Migration
-
-This project uses local Terraform state for simplicity. To migrate to S3 for team collaboration:
-
-```bash
-# 1. Create S3 bucket and DynamoDB table for locking
-aws s3api create-bucket \
-  --bucket chuck-norris-tf-state \
-  --region eu-north-1 \
-  --create-bucket-configuration LocationConstraint=eu-north-1
-
-aws s3api put-bucket-versioning \
-  --bucket chuck-norris-tf-state \
-  --versioning-configuration Status=Enabled
-
-aws dynamodb create-table \
-  --table-name chuck-norris-tf-lock \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
-
-# 2. Add backend block to terraform/main.tf:
-#    backend "s3" {
-#      bucket         = "chuck-norris-tf-state"
-#      key            = "terraform.tfstate"
-#      region         = "eu-north-1"
-#      dynamodb_table = "chuck-norris-tf-lock"
-#      encrypt        = true
-#    }
-
-# 3. Run: terraform init -migrate-state
-```
-
----
 
 ## License
 
