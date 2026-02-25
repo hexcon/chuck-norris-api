@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi.openapi.docs import get_redoc_html
+from starlette.responses import HTMLResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -79,7 +81,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
-    redoc_url="/redoc",
+    redoc_url=None,  # disabled; custom route below pins a stable JS version
     responses={
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
@@ -90,6 +92,16 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(RequestLoggingMiddleware)
+
+
+@app.get("/redoc", include_in_schema=False)
+def custom_redoc() -> HTMLResponse:
+    """Serve ReDoc with a pinned stable JS version."""
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js",
+    )
 
 
 # ---------------------------------------------------------------------------
