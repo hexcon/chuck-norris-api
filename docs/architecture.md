@@ -4,7 +4,7 @@
 
 ```
                     ┌─────────────────────────────────────────┐
-                    │            GitHub Actions                │
+                    │            GitHub Actions               │
                     │   Lint → Test → Build → Push → Deploy   │
                     └──────────────┬──────────────────────────┘
                                    │ SSH + Ansible
@@ -14,12 +14,12 @@
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  Docker Compose                                        │ │
 │  │  ┌──────────────────┐     ┌──────────────────────┐     │ │
-│  │  │  FastAPI App      │────▶│  PostgreSQL 16       │     │ │
-│  │  │  (port 8000)      │     │  (internal only)     │     │ │
-│  │  │  - Rate limiting  │     │  - Encrypted volume  │     │ │
-│  │  │  - JSON logging   │     │  - Persistent data   │     │ │
-│  │  │  - API key auth   │     └──────────────────────┘     │ │
-│  │  └──────────────────┘                                   │ │
+│  │  │  FastAPI App     │────▶│  PostgreSQL 16       │     │ │
+│  │  │  (port 8000)     │     │  (internal only)     │     │ │
+│  │  │  - Rate limiting │     │  - Encrypted volume  │     │ │
+│  │  │  - JSON logging  │     │  - Persistent data   │     │ │
+│  │  │  - API key auth  │     └──────────────────────┘     │ │
+│  │  └──────────────────┘                                  │ │
 │  └────────────────────────────────────────────────────────┘ │
 │  ┌────────────────────┐     ┌──────────────────────┐        │
 │  │  CloudWatch Agent  │────▶│  AWS CloudWatch      │        │
